@@ -6,14 +6,10 @@
     let url, home;
     try { url = new URL(raw.trim()); home = new URL(base); } catch { return null; }
     if (url.username || url.password || url.hash || url.protocol !== 'https:') return null;
-    const routes = [new URL('checkout.html', home).href,
-      'https://fileorganizercore.ir/web/checkout.html',
-      'https://fileorganizerpro.mohammadaslanidev.ir/web/checkout.html',
-      'https://fileorganizerpro.mohammadaslanidev.ir/checkout.html',
-      'https://fileorganizercore.ir/checkout.html',
-      'https://aslani99.github.io/FileOrganizerPro-Pi/web/checkout.html'];
+    // A QR link must remain inside this deployment's origin.
+    const routes = [new URL('checkout.html', home).href];
     if (configured) {
-      try { const c = new URL(configured); if (c.protocol === 'https:' && !c.username && !c.password) routes.push(c.origin + c.pathname); } catch { }
+      try { const c = new URL(configured); if (c.protocol === 'https:' && c.origin === home.origin && !c.username && !c.password) routes.push(c.origin + c.pathname); } catch { }
     }
     if (!routes.some(route => { const r = new URL(route); return url.origin === r.origin && url.pathname === r.pathname; })) return null;
     const tokens = url.searchParams.getAll('token');
