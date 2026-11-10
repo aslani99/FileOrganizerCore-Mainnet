@@ -1,0 +1,51 @@
+name: Refresh Pi Rate - Mainnet
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: refresh-pi-rate-mainnet
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Refresh Mainnet rate
+        shell: bash
+        env:
+          RATE_SECRET: ${{ secrets.FOP_RATE_SECRET }}
+        run: |
+          set -euo pipefail
+
+          if [ -z "$RATE_SECRET" ]; then
+            echo "::error::FOP_RATE_SECRET is missing."
+            exit 1
+          fi
+
+          response_file=$(mktemp)
+          trap 'rm -f "$response_file"' EXIT
+
+          status=$(curl --silent --show-error \
+            --connect-timeout 10 \
+            --max-time 45 \
+            --output "$response_file" \
+            --write-out "%{http_code}" \
+            --request POST \
+            "https://rjxowzwuusqmfjjzzvgp.supabase.co/functions/v1/refresh-pi-rate" \
+            --header "Authorization: Bearer $RATE_SECRET" \
+            --header "Content-Type: application/json" \
+            --data '{}')
+
+          if [ "$status" != "200" ]; then
+            echo "::error::Rate refresh failed: HTTP $status"
+            exit 1
+          fi
+
+          jq -e '.ok == true' "$response_file" >/dev/null
+          jq '{ok, updated, usdRate, updatedAt}' "$response_file"
