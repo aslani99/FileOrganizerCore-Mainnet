@@ -40,3 +40,27 @@ header .tools>[data-scan]{order:0;}
  header .pi-shortcut{width:80px;min-width:80px;max-width:80px;white-space:normal;overflow-wrap:anywhere;}
 }
 
+
+
+/* Signed-in account and live subscription summary. */
+.account-card{margin-top:22px;padding:25px;border:1px solid var(--line);border-radius:20px;background:linear-gradient(145deg,#7545c410,transparent 70%),var(--surface);}
+.account-card[hidden]{display:none!important}
+.account-card-head{display:flex;align-items:center;gap:15px;min-width:0}
+.account-avatar{width:48px;height:48px;display:grid;place-items:center;flex:none;border-radius:15px;background:#59348d;color:#efc77c;font-size:29px;font-weight:700}
+.account-identity{min-width:0;flex:1}
+.account-identity .eyebrow{margin:0 0 3px;color:var(--muted);font-size:11px}
+.account-identity h3{margin:0;font-size:18px;overflow-wrap:anywhere}
+.account-identity p:last-child{margin:3px 0 0;color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+.account-plan-badge{padding:7px 12px;border:1px solid var(--line);border-radius:999px;font-size:12px;font-weight:700;white-space:nowrap}
+.account-plan-badge[data-plan="pro"]{border-color:#8c70c8;color:#bca5f1;background:#8c70c81a}
+.account-plan-badge[data-plan="max"]{border-color:#c59a43;color:var(--gold);background:#c59a431a}
+.account-stats{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:22px}
+.account-stats>div{display:flex;flex-direction:column;gap:7px;min-width:0;padding:14px;border:1px solid var(--line);border-radius:13px;background:var(--panel)}
+.account-stats span{color:var(--muted);font-size:12px}
+.account-stats strong{font-size:15px;overflow-wrap:anywhere}
+.account-plan-note{margin:12px 0 0;color:var(--gold);font-size:12px}
+.account-card-foot{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:16px}
+.account-card-foot p{margin:0;color:var(--muted);font-size:12px;overflow-wrap:anywhere}
+.account-card-foot p.error{color:var(--danger)}
+.account-card-foot button{flex:none}
+@media(max-width:700px){.account-card{padding:19px}.account-stats{grid-template-columns:1fr;gap:8px}.account-stats>div{flex-direction:row;align-items:center;justify-content:space-between}.account-stats strong{text-align:end}.account-card-foot{align-items:stretch;flex-direction:column}.account-card-foot button{width:100%}}

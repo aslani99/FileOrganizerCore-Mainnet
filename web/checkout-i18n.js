@@ -1,6 +1,7 @@
 window.FOP_CHECKOUT_TEXT = {
   "en": {
     "pay": "Pay with Pi",
+    "returnHome": "Back to home",
     "follow": "Follow the instructions in Pi Browser to continue.",
     "syncPending": "Payment received. Subscription activation is pending. Check the app shortly.",
     "diagnostics": "Payment diagnostics",
@@ -18,6 +19,7 @@ window.FOP_CHECKOUT_TEXT = {
   },
   "fa": {
     "pay": "پرداخت با Pi",
+    "returnHome": "بازگشت به صفحهٔ اصلی",
     "follow": "برای ادامه، مراحل نمایش‌داده‌شده در مرورگر Pi را دنبال کنید.",
     "syncPending": "پرداخت دریافت شد. فعال‌سازی اشتراک در انتظار است. کمی بعد برنامه را بررسی کنید.",
     "diagnostics": "گزارش فنی پرداخت",

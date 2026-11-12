@@ -4,6 +4,8 @@
   const token = new URLSearchParams(location.search).get('token');
   const status = document.getElementById('status'), details = document.getElementById('details'), button = document.getElementById('payButton');
   const T = window.FOP_I18N.text;
+  const homeReturn = document.getElementById('homeReturn');
+  document.getElementById('homeReturnLabel').textContent = T.returnHome || (window.FOP_I18N.language === 'fa' ? 'بازگشت به صفحهٔ اصلی' : 'Back to home');
   button.textContent = T.pay;
   document.getElementById('summary-label').textContent = T.summary;
   document.getElementById('checkout-heading').textContent = T.heading;
@@ -96,7 +98,8 @@
     verificationWaiting = false; clearTimeout(verificationTimer);
     
     terminal = true; button.disabled = true; button.classList.add('hidden');
-    show(data.subscriptionPendingSync ? T.syncPending : T.success);
+    show(T.success);
+    homeReturn.hidden = false;
   }
   function recover(payment) {
     
