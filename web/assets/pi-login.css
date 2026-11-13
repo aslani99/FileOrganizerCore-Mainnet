@@ -25,3 +25,5 @@ html[dir=rtl] select{direction:rtl}
 #browserNotice{display:flex;gap:8px;align-items:flex-start;justify-content:center;color:var(--error);margin-top:12px;text-align:start}#browserNotice>svg{flex:none;margin-top:4px}
 
 .brand .foc-logo{margin-inline-end:8px}
+
+.home-return{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;min-height:48px;margin-top:12px;padding:12px 18px;border:1px solid var(--border);border-radius:13px;background:var(--surface);color:var(--ink);font-size:14px;font-weight:650;text-decoration:none;transition:border-color .18s,background .18s,transform .18s}.home-return:hover{border-color:#9271ce;background:color-mix(in srgb,var(--brand) 10%,transparent)}.home-return:active{transform:translateY(1px)}.home-return svg{width:19px;height:19px;color:var(--brand);flex:none}.home-return[hidden]{display:none!important}

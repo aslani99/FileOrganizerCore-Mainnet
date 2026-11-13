@@ -1,8 +1,4 @@
-/*
- * FileOrganizerCore website account session and subscription sync.
- * Pi authentication is completed by the existing server-side pi-auth challenge flow.
- * This page stores short-lived session material in sessionStorage only.
- */
+/* Persistent website account session, received only from the Pi-login desktop handoff. */
 (() => {
   'use strict';
 
@@ -13,215 +9,117 @@
   if (!button || !card || !cfg.SUPABASE_URL || !cfg.SUPABASE_ANON_KEY) return;
 
   const SESSION_KEY = 'foc-web-auth-session';
-  const PENDING_KEY = 'foc-web-auth-pending';
-  const AUTH_URL = `${cfg.SUPABASE_URL.replace(/\/$/, '')}/functions/v1/pi-auth`;
-  const SUPABASE_URL = cfg.SUPABASE_URL.replace(/\/$/, '');
-  const copy = {
-    en: {
-      login: 'Sign in / Sign up with Pi', logout: 'Sign out', working: 'Completing Pi sign-in…',
-      piIntro: 'Sign in or create your FileOrganizerCore account with Pi. Your plan and usage will sync from the server.',
-      waiting: 'Waiting for Pi approval. Return here after approving in Pi Browser.',
-      signedIn: 'Signed in successfully.', sync: 'Refreshing account status…', synced: 'Account status is up to date.',
-      offline: 'You are offline. Connect to the internet to refresh your account status.',
-      failed: 'Could not synchronize your account. Check your connection and try again.',
-      expired: 'Your sign-in session expired. Sign in with Pi again.',
-      account: 'Pi account', plan: 'Current plan', quota: 'Remaining quota', expiry: 'Valid until',
-      unlimited: 'Unlimited', noExpiry: 'No expiry date', refresh: 'Refresh account status',
-      free: 'Free', pro: 'Pro', max: 'Max', gib: 'GiB remaining',
-      expiredPlan: 'Expired plan',
-      startFailed: 'Could not start Pi sign-in. Open this website in Pi Browser and try again.',
-      challengeExpired: 'The Pi sign-in request expired. Please start again.',
-      accountEmail: 'Email linked', quotaUnavailable: 'Quota information unavailable'
-    },
-    fa: {
-      login: 'ورود / ثبت‌نام با Pi', logout: 'خروج از حساب', working: 'در حال تکمیل ورود با Pi…',
-      piIntro: 'با Pi وارد شوید یا حساب FileOrganizerCore بسازید. پلن و میزان مصرف از سرور همگام‌سازی می‌شود.',
-      waiting: 'در انتظار تأیید Pi هستیم. پس از تأیید در Pi Browser به این صفحه برگردید.',
-      signedIn: 'ورود با موفقیت انجام شد.', sync: 'در حال دریافت آخرین وضعیت حساب…', synced: 'وضعیت حساب به‌روز است.',
-      offline: 'اتصال اینترنت برقرار نیست. برای همگام‌سازی وضعیت حساب به اینترنت متصل شوید.',
-      failed: 'همگام‌سازی حساب انجام نشد. اتصال اینترنت را بررسی و دوباره تلاش کنید.',
-      expired: 'نشست ورود منقضی شده است. دوباره با Pi وارد شوید.',
-      account: 'حساب Pi', plan: 'پلن فعلی', quota: 'سهمیه باقی‌مانده', expiry: 'اعتبار تا',
-      unlimited: 'نامحدود', noExpiry: 'بدون تاریخ انقضا', refresh: 'به‌روزرسانی وضعیت حساب',
-      free: 'رایگان', pro: 'پرو', max: 'مکس', gib: 'گیگابایت باقی‌مانده',
-      expiredPlan: 'پلن منقضی‌شده',
-      startFailed: 'شروع ورود با Pi ممکن نشد. وب‌سایت را در Pi Browser باز کنید و دوباره تلاش کنید.',
-      challengeExpired: 'درخواست ورود با Pi منقضی شد. دوباره شروع کنید.',
-      accountEmail: 'ایمیل متصل‌شده', quotaUnavailable: 'اطلاعات سهمیه در دسترس نیست'
-    }
-  };
-  const language = () => (document.documentElement.lang || 'en').toLowerCase().split('-')[0];
-  const t = key => (copy[language()] || copy.en)[key] || copy.en[key] || key;
+  const CACHE_KEY = 'foc-web-account-cache';
+  const SUPABASE_URL = String(cfg.SUPABASE_URL).replace(/\/$/, '');
+  const AUTH_URL = `${SUPABASE_URL}/auth/v1`;
+  const ACCOUNT_TEXT = window.FOP_ACCOUNT_TEXT || {};
   const safeJson = value => { try { return JSON.parse(value || 'null'); } catch { return null; } };
-  const storageGet = key => { try { return sessionStorage.getItem(key); } catch { return null; } };
-  const storageSet = (key, value) => { try { sessionStorage.setItem(key, value); return true; } catch { return false; } };
-  const storageRemove = key => { try { sessionStorage.removeItem(key); } catch { } };
+  const language = () => {
+    const raw = String(document.documentElement.lang || 'en').trim().toLowerCase();
+    if (raw.startsWith('zh-hant') || raw.startsWith('zh-tw') || raw.startsWith('zh-hk')) return 'zh-Hant';
+    if (raw.startsWith('zh')) return 'zh-Hans';
+    return raw.split('-')[0] || 'en';
+  };
+  const t = key => (ACCOUNT_TEXT[language()] || ACCOUNT_TEXT.en || {})[key]
+    || (ACCOUNT_TEXT.en || {})[key] || key;
+  const storageGet = key => { try { return localStorage.getItem(key); } catch { return null; } };
+  const storageSet = (key, value) => { try { localStorage.setItem(key, value); return true; } catch { return false; } };
+  const storageRemove = key => { try { localStorage.removeItem(key); } catch { } };
   const readSession = () => safeJson(storageGet(SESSION_KEY));
-  const writeSession = value => { if (!storageSet(SESSION_KEY, JSON.stringify(value))) throw new Error('session_storage_unavailable'); };
-  const delay = ms => new Promise(resolve => window.setTimeout(resolve, ms));
-  let busy = false;
-  let syncBusy = false;
-  let lastProfile = null;
-
-  function updateStaticLabels() {
-    document.querySelectorAll('[data-account-key]').forEach(element => {
-      const key = element.dataset.accountKey;
-      if (copy[language()]?.[key] || copy.en[key]) element.textContent = t(key);
-    });
-    if (!readSession()?.accessToken && !safeJson(storageGet(PENDING_KEY))) $('piStatus').textContent = t('piIntro');
-  }
-
-  function setStatus(message, isError = false) {
-    const status = $('accountSyncStatus');
-    if (!status) return;
-    status.textContent = message;
-    status.classList.toggle('error', isError);
-    const piStatus = $('piStatus');
-    if (piStatus) { piStatus.textContent = message; piStatus.classList.toggle('error', isError); }
-  }
-
-  function setButtonLabel() {
-    const session = readSession();
-    const pending = safeJson(storageGet(PENDING_KEY));
-    const label = session?.accessToken ? t('logout') : pending ? t('working') : t('login');
-    if (button.textContent !== label) button.textContent = label;
-    button.disabled = busy;
-    if (!session?.accessToken) {
-      $('piUser').hidden = true;
-      $('piUser').textContent = '';
-    }
-  }
-
-  function decodeExpiry(jwt) {
+  const writeSession = value => {
+    if (!storageSet(SESSION_KEY, JSON.stringify(value))) throw new Error('session_storage_unavailable');
+  };
+  const decodeExpiry = jwt => {
     try {
       const part = jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
       const payload = JSON.parse(atob(part.padEnd(Math.ceil(part.length / 4) * 4, '=')));
       return Number(payload.exp) * 1000;
     } catch { return 0; }
+  };
+  const sameOwner = (session, ownerId) => !!session?.user?.id && session.user.id === ownerId;
+  const connected = () => {
+    const session = readSession();
+    return typeof session?.accessToken === 'string' && typeof session?.refreshToken === 'string'
+      && !!session?.user?.id;
+  };
+  let syncBusy = false;
+  let syncAgain = false;
+  let requestGeneration = 0;
+  let lastSnapshot = null;
+  let refreshTimer = null;
+
+  function notifyConnectionChanged() {
+    window.dispatchEvent(new Event('foc-web-account-state'));
   }
 
-  async function postAuth(body) {
-    const response = await fetch(AUTH_URL, {
-      method: 'POST',
-      headers: { apikey: cfg.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-      credentials: 'omit',
-      cache: 'no-store',
-      signal: AbortSignal.timeout(20000)
+  function updateStaticLabels() {
+    document.querySelectorAll('[data-account-key]').forEach(element => {
+      const key = element.dataset.accountKey;
+      element.textContent = t(key);
     });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(data.error || 'auth_request_failed');
-    return data;
   }
 
-  async function beginPiSignIn() {
-    if (busy) return;
-    busy = true;
-    setButtonLabel();
-    setStatus(t('working'));
-    try {
-      const result = await postAuth({ action: 'start', purpose: 'login' });
-      if (typeof result.device_secret !== 'string' || !/^[a-f0-9]{64}$/.test(result.device_secret)
-          || typeof result.url !== 'string' || typeof result.expires_at !== 'string'
-          || typeof result.server_now !== 'string') throw new Error('invalid_challenge');
-      const target = new URL(result.url, location.href);
-      if (target.origin !== location.origin || !target.pathname.endsWith('/pi-login.html')
-          || !/^[a-f0-9]{64}$/.test(target.hash.slice(1).split('?')[0])) throw new Error('invalid_challenge_url');
-      const duration = Date.parse(result.expires_at) - Date.parse(result.server_now);
-      if (!Number.isFinite(duration) || duration <= 0 || duration > 10 * 60 * 1000) throw new Error('invalid_challenge_expiry');
-      if (!storageSet(PENDING_KEY, JSON.stringify({
-        deviceSecret: result.device_secret,
-        deadline: Date.now() + duration
-      }))) throw new Error('session_storage_unavailable');
-      setStatus(t('waiting'));
-      location.assign(target.href);
-    } catch (error) {
-      console.error('[FileOrganizerCore account] Pi sign-in start failed:', error?.message || 'unknown');
-      setStatus(t('startFailed'), true);
-      busy = false;
-      setButtonLabel();
+  function setStatus(message, isError = false) {
+    const status = $('accountSyncStatus');
+    if (status) {
+      status.textContent = message;
+      status.classList.toggle('error', isError);
+    }
+    const piStatus = $('piStatus');
+    if (piStatus) {
+      piStatus.textContent = message;
+      piStatus.classList.toggle('error', isError);
     }
   }
 
-  async function completePendingSignIn() {
-    if (busy) return false;
-    const pending = safeJson(storageGet(PENDING_KEY));
-    if (!pending || typeof pending.deviceSecret !== 'string' || !/^[a-f0-9]{64}$/.test(pending.deviceSecret)) return false;
-    if (!Number.isFinite(pending.deadline) || pending.deadline <= Date.now()) {
-      storageRemove(PENDING_KEY);
-      setStatus(t('challengeExpired'), true);
-      setButtonLabel();
+  function formatBytes(bytes) {
+    const value = Number(bytes);
+    if (!Number.isFinite(value) || value < 0) return t('quotaUnavailable');
+    return `${new Intl.NumberFormat(language(), { maximumFractionDigits: 2 }).format(value / (1024 ** 3))} ${t('gib')}`;
+  }
+
+  function renderAccount(profile, quota, session) {
+    const plan = String(quota?.plan || profile?.plan || '').toLowerCase();
+    if (!['free', 'pro', 'max'].includes(plan)) throw new Error('invalid_plan');
+    const remaining = Number(quota?.remaining_bytes);
+    let quotaText = t('quotaUnavailable');
+    if (remaining === -1) quotaText = t('unlimited');
+    else if (Number.isFinite(remaining) && remaining >= 0) quotaText = formatBytes(remaining);
+
+    const expiry = profile.plan_expires_at ? new Date(profile.plan_expires_at) : null;
+    const expiryText = expiry && Number.isFinite(expiry.getTime())
+      ? new Intl.DateTimeFormat(language(), { dateStyle: 'medium' }).format(expiry)
+      : t('noExpiry');
+    const user = session.user || {};
+    const username = String(user.pi_username || user.user_metadata?.pi_username || 'Pi user').slice(0, 128);
+    const email = typeof user.email === 'string' && !user.email.endsWith('@pi-auth.invalid') ? user.email : '';
+
+    $('accountName').textContent = username;
+    $('accountEmail').textContent = email ? `${t('accountEmail')}: ${email}` : t('account');
+    $('accountPlanValue').textContent = t(plan);
+    $('accountQuotaValue').textContent = quotaText;
+    $('accountExpiryValue').textContent = expiryText;
+    $('accountPlanBadge').textContent = t(plan);
+    $('accountPlanBadge').dataset.plan = plan;
+    const expiredPlan = String(profile.last_expired_plan || '').toLowerCase();
+    $('accountPlanNote').textContent = ['free', 'pro', 'max'].includes(expiredPlan)
+      ? `${t('expiredPlan')}: ${t(expiredPlan)}` : '';
+    card.hidden = false;
+
+    lastSnapshot = { ownerId: session.user.id, profile, quota, savedAt: Date.now() };
+    storageSet(CACHE_KEY, JSON.stringify(lastSnapshot));
+  }
+
+  function restoreCachedAccount(session) {
+    const cached = safeJson(storageGet(CACHE_KEY));
+    if (!sameOwner(session, cached?.ownerId) || !cached.profile || !cached.quota) return false;
+    try {
+      renderAccount(cached.profile, cached.quota, session);
+      return true;
+    } catch {
+      storageRemove(CACHE_KEY);
       return false;
     }
-
-    busy = true;
-    setButtonLabel();
-    setStatus(t('working'));
-    try {
-      while (Date.now() < pending.deadline) {
-        let state;
-        try {
-          state = await postAuth({ action: 'poll', device_secret: pending.deviceSecret });
-        } catch (error) {
-          if (['expired', 'unauthorized', 'invalid_request'].includes(error.message)) throw error;
-          await delay(2200);
-          continue;
-        }
-        if (state.state === 'approved') {
-          // redeem is deliberately single-use on the server; a lost reply requires a fresh challenge.
-          const result = await postAuth({ action: 'redeem', device_secret: pending.deviceSecret, confirm: true });
-          if (result.state !== 'signed_in' || typeof result.access_token !== 'string'
-              || typeof result.refresh_token !== 'string' || !result.user?.id) throw new Error('session_failed');
-          const session = {
-            accessToken: result.access_token,
-            refreshToken: result.refresh_token,
-            user: result.user,
-            expiresAt: decodeExpiry(result.access_token)
-          };
-          if (!session.expiresAt) throw new Error('invalid_session');
-          writeSession(session);
-          storageRemove(PENDING_KEY);
-          setStatus(t('signedIn'));
-          setButtonLabel();
-          await syncAccount();
-          return true;
-        }
-        if (state.state !== 'pending') throw new Error('expired');
-        await delay(1800);
-      }
-      throw new Error('expired');
-    } catch (error) {
-      console.error('[FileOrganizerCore account] Pi sign-in could not be completed:', error?.message || 'unknown');
-      storageRemove(PENDING_KEY);
-      storageRemove('foc-pi-display');
-      setStatus(error.message === 'expired' ? t('challengeExpired') : t('startFailed'), true);
-      return false;
-    } finally {
-      busy = false;
-      setButtonLabel();
-    }
-  }
-
-  async function refreshSession(session) {
-    if (session.expiresAt > Date.now() + 90000) return session;
-    const response = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
-      method: 'POST',
-      headers: { apikey: cfg.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ refresh_token: session.refreshToken }),
-      credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(15000)
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || typeof data.access_token !== 'string' || typeof data.refresh_token !== 'string')
-      throw new Error('session_expired');
-    const updated = {
-      accessToken: data.access_token,
-      refreshToken: data.refresh_token,
-      user: { ...(session.user || {}), id: session.user.id, email: (typeof data.user?.email === 'string' && !data.user.email.endsWith('@pi-auth.invalid') ? data.user.email : session.user.email || null), pi_username: session.user?.pi_username || data.user?.user_metadata?.pi_username },
-      expiresAt: decodeExpiry(data.access_token)
-    };
-    if (!updated.expiresAt) throw new Error('session_expired');
-    writeSession(updated);
-    return updated;
   }
 
   async function authorizedFetch(path, session, options = {}) {
@@ -235,127 +133,167 @@
       credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(15000)
     });
     if (response.status === 401) throw new Error('session_expired');
-    if (!response.ok) throw new Error(`account_http_${response.status}`);
+    if (!response.ok) throw new Error('account_sync_failed');
     return response;
   }
 
-  function formatBytes(bytes) {
-    const value = Number(bytes);
-    if (!Number.isFinite(value) || value < 0) return t('quotaUnavailable');
-    return `${new Intl.NumberFormat(language(), { maximumFractionDigits: 2 }).format(value / (1024 ** 3))} ${t('gib')}`;
-  }
-
-  function renderAccount(profile, plans, session) {
-    const plan = String(profile.plan || 'free').toLowerCase();
-    if (!['free', 'pro', 'max'].includes(plan)) throw new Error('invalid_plan');
-    const planInfo = plans.find(item => item.plan_id === plan);
-    const freeInfo = plans.find(item => item.plan_id === 'free');
-    const used = Math.max(0, Number(profile.bytes_organized_total) || 0);
-    const limit = planInfo?.organization_limit_bytes == null ? null : Number(planInfo.organization_limit_bytes);
-    let quotaText = t('unlimited');
-    if (limit !== null && Number.isFinite(limit) && limit >= 0) quotaText = formatBytes(Math.max(0, limit - used));
-    else if (plan === 'free' && freeInfo?.organization_limit_bytes != null) {
-      const freeLimit = Number(freeInfo.organization_limit_bytes);
-      quotaText = Number.isFinite(freeLimit) ? formatBytes(Math.max(0, freeLimit - used)) : t('quotaUnavailable');
+  async function refreshSession(session) {
+    const expiry = decodeExpiry(session.accessToken);
+    if (expiry > Date.now() + 90000) return { ...session, expiresAt: expiry };
+    const response = await fetch(`${AUTH_URL}/token?grant_type=refresh_token`, {
+      method: 'POST',
+      headers: { apikey: cfg.SUPABASE_ANON_KEY, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refresh_token: session.refreshToken }),
+      credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(15000)
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      if (response.status === 400 || response.status === 401) throw new Error('session_expired');
+      throw new Error('account_sync_failed');
     }
-
-    const expiry = profile.plan_expires_at ? new Date(profile.plan_expires_at) : null;
-    const expiryText = expiry && Number.isFinite(expiry.getTime())
-      ? new Intl.DateTimeFormat(document.documentElement.lang || 'en', { dateStyle: 'medium' }).format(expiry)
-      : t('noExpiry');
-    const user = session.user || {};
-    const username = String(user.pi_username || 'Pi user').slice(0, 128);
-    $('accountName').textContent = username;
-    $('accountEmail').textContent = user.email ? `${t('accountEmail')}: ${user.email}` : t('account');
-    $('accountPlanValue').textContent = t(plan);
-    $('accountQuotaValue').textContent = quotaText;
-    $('accountExpiryValue').textContent = expiryText;
-    $('accountPlanBadge').textContent = t(plan);
-    $('accountPlanBadge').dataset.plan = plan;
-    $('accountPlanNote').textContent = profile.last_expired_plan
-      ? `${t('expiredPlan')}: ${t(String(profile.last_expired_plan).toLowerCase())}` : '';
-    card.hidden = false;
-    $('piUser').hidden = false;
-    $('piUser').textContent = `${t('account')}: ${username}`;
-    lastProfile = profile;
+    if (typeof data.access_token !== 'string' || typeof data.refresh_token !== 'string')
+      throw new Error('account_sync_failed');
+    if (data.user?.id !== session.user.id) throw new Error('session_expired');
+    const updated = {
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      user: {
+        ...(session.user || {}),
+        id: session.user.id,
+        email: typeof data.user?.email === 'string' && !data.user.email.endsWith('@pi-auth.invalid')
+          ? data.user.email : session.user.email || null,
+        pi_username: session.user?.pi_username || data.user?.user_metadata?.pi_username || null
+      },
+      expiresAt: decodeExpiry(data.access_token),
+      piChallengeId: session.piChallengeId || null
+    };
+    if (!updated.expiresAt) throw new Error('account_sync_failed');
+    writeSession(updated);
+    return updated;
   }
 
   async function syncAccount() {
-    if (syncBusy) return;
-    let session = readSession();
-    if (!session?.accessToken || !session?.refreshToken || !session?.user?.id) {
+    if (syncBusy) { syncAgain = true; return; }
+    const initial = readSession();
+    if (!initial?.accessToken || !initial?.refreshToken || !initial?.user?.id) {
       card.hidden = true;
-      setButtonLabel();
+      storageRemove(CACHE_KEY);
+      try { sessionStorage.removeItem('foc-pi-display'); } catch { }
+      window.FOC_CLEAR_PI_DISPLAY?.();
+      notifyConnectionChanged();
       return;
     }
-    if (!navigator.onLine) { setStatus(t('offline'), true); return; }
+
     syncBusy = true;
+    syncAgain = false;
+    const generation = ++requestGeneration;
+    const ownerId = initial.user.id;
+    let expectedRefreshToken = initial.refreshToken;
+    const isCurrent = () => {
+      const current = readSession();
+      return generation === requestGeneration && sameOwner(current, ownerId)
+        && current.refreshToken === expectedRefreshToken;
+    };
+    const refreshButton = $('accountRefresh');
+    if (refreshButton) refreshButton.disabled = true;
     setStatus(t('sync'));
+
     try {
-      session = await refreshSession(session);
-      // refresh_subscription applies server-side expiry transitions before we read the profile.
+      if (!navigator.onLine) {
+        restoreCachedAccount(initial);
+        setStatus(t('offline'), true);
+        return;
+      }
+      let session = await refreshSession(initial);
+      expectedRefreshToken = session.refreshToken;
+      if (!isCurrent()) return;
+      // Apply any expired-plan transition before reading the current plan and quota.
       await authorizedFetch('/rest/v1/rpc/refresh_subscription', session, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
       });
-      const userId = encodeURIComponent(session.user.id);
-      const [profileResponse, plansResponse] = await Promise.all([
-        authorizedFetch(`/rest/v1/profiles?select=plan,plan_expires_at,bytes_organized_total,last_expired_plan&id=eq.${userId}`, session),
-        fetch(`${SUPABASE_URL}/rest/v1/plans?select=plan_id,organization_limit_bytes`, {
-          headers: { apikey: cfg.SUPABASE_ANON_KEY, Authorization: `Bearer ${cfg.SUPABASE_ANON_KEY}` },
-          credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(15000)
+      if (!isCurrent()) return;
+      const userId = encodeURIComponent(ownerId);
+      const [profileResponse, quotaResponse] = await Promise.all([
+        authorizedFetch(`/rest/v1/profiles?select=plan,plan_expires_at,last_expired_plan&id=eq.${userId}`, session),
+        authorizedFetch('/rest/v1/rpc/get_organization_quota_status', session, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
         })
       ]);
-      if (!plansResponse.ok) throw new Error('plans_unavailable');
-      const profiles = await profileResponse.json();
-      const plans = await plansResponse.json();
-      if (!Array.isArray(profiles) || profiles.length !== 1 || !Array.isArray(plans)) throw new Error('profile_unavailable');
-      renderAccount(profiles[0], plans, session);
+      const [profiles, quota] = await Promise.all([profileResponse.json(), quotaResponse.json()]);
+      if (!isCurrent()) return;
+      if (!Array.isArray(profiles) || profiles.length !== 1 || !quota || typeof quota !== 'object')
+        throw new Error('account_sync_failed');
+      // Never show a response belonging to an account that has since disconnected or changed.
+      const latest = readSession();
+      if (!sameOwner(latest, ownerId) || latest.refreshToken !== session.refreshToken) return;
+      renderAccount(profiles[0], quota, session);
       setStatus(t('synced'));
+      notifyConnectionChanged();
     } catch (error) {
-      console.error('[FileOrganizerCore account] Account sync failed:', error?.message || 'unknown');
-      if (error.message === 'session_expired') {
+      if (!isCurrent()) return;
+      if (error?.message === 'session_expired') {
         storageRemove(SESSION_KEY);
+        storageRemove(CACHE_KEY);
+        lastSnapshot = null;
         card.hidden = true;
+        try { sessionStorage.removeItem('foc-pi-display'); } catch { }
+        window.FOC_CLEAR_PI_DISPLAY?.();
         setStatus(t('expired'), true);
+        notifyConnectionChanged();
       } else {
+        restoreCachedAccount(initial);
+        console.error('[FileOrganizerCore account] Account sync failed:', error?.message || 'unknown');
         setStatus(t('failed'), true);
       }
-      setButtonLabel();
     } finally {
       syncBusy = false;
+      if (refreshButton) refreshButton.disabled = false;
+      if (syncAgain) { syncAgain = false; void syncAccount(); }
     }
   }
 
-  function signOut() {
+  function disconnect() {
+    const session = readSession();
+    requestGeneration++;
     storageRemove(SESSION_KEY);
-    storageRemove(PENDING_KEY);
-    storageRemove('foc-pi-display');
-    lastProfile = null;
+    storageRemove(CACHE_KEY);
+    lastSnapshot = null;
     card.hidden = true;
-    $('piUser').hidden = true;
-    setStatus('');
-    setButtonLabel();
+    try { sessionStorage.removeItem('foc-pi-display'); } catch { }
+    window.FOC_CLEAR_PI_DISPLAY?.();
+    setStatus(t('disconnected'));
+    notifyConnectionChanged();
+    // The browser has its own session, separate from the desktop app's independently minted session.
+    if (session?.accessToken) {
+      void fetch(`${AUTH_URL}/logout`, {
+        method: 'POST', headers: { apikey: cfg.SUPABASE_ANON_KEY, Authorization: `Bearer ${session.accessToken}` },
+        credentials: 'omit', cache: 'no-store', signal: AbortSignal.timeout(8000)
+      }).catch(() => { });
+    }
   }
 
-  button.onclick = () => readSession()?.accessToken ? signOut() : beginPiSignIn();
-  $('accountRefresh')?.addEventListener('click', syncAccount);
+  window.FOC_WEB_ACCOUNT = { isConnected: connected, disconnect };
+  $('accountRefresh')?.addEventListener('click', () => { void syncAccount(); });
   $('language')?.addEventListener('change', () => {
     updateStaticLabels();
-    if (lastProfile) syncAccount();
-    setButtonLabel();
+    if (lastSnapshot) void syncAccount();
   });
-  const languageObserver = new MutationObserver(() => { updateStaticLabels(); setButtonLabel(); });
+  const languageObserver = new MutationObserver(() => updateStaticLabels());
   languageObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['lang'] });
-  window.addEventListener('online', () => { syncAccount(); $('reloadPlans')?.click(); });
-  window.addEventListener('focus', syncAccount);
-  window.addEventListener('pageshow', async () => {
-    if (safeJson(storageGet(PENDING_KEY))) await completePendingSignIn();
-    else await syncAccount();
+  window.addEventListener('online', () => { void syncAccount(); $('reloadPlans')?.click(); });
+  window.addEventListener('focus', () => { void syncAccount(); });
+  window.addEventListener('pageshow', () => { void syncAccount(); });
+  window.addEventListener('storage', event => {
+    if (event.key === SESSION_KEY) { notifyConnectionChanged(); void syncAccount(); }
   });
-  document.addEventListener('visibilitychange', () => { if (!document.hidden) syncAccount(); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) void syncAccount(); });
+  refreshTimer = window.setInterval(() => { if (!document.hidden && navigator.onLine) void syncAccount(); }, 5 * 60 * 1000);
+  window.addEventListener('pagehide', () => { if (refreshTimer) window.clearInterval(refreshTimer); });
 
   updateStaticLabels();
-  setButtonLabel();
-  if (safeJson(storageGet(PENDING_KEY))) completePendingSignIn();
-  else syncAccount();
+  try { sessionStorage.removeItem('foc-web-auth-pending'); } catch { }
+  if (connected()) restoreCachedAccount(readSession());
+  else storageRemove(CACHE_KEY);
+  notifyConnectionChanged();
+  void syncAccount();
 })();

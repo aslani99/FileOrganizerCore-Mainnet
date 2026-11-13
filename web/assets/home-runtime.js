@@ -12990,7 +12990,20 @@ window.FOP_HOME_TEXT = {
     renderPi(); renderSelected(); renderScannerMode();
   }
   function renderSelected() { $('selectedPlan').textContent = scannerMode==='auth' ? T.authScanHelp : selectedPlan ? T.selected+' '+T[selectedPlan]+'. '+T.selectNote : T.selectNote; }
-  function renderPi() { $('piUser').hidden = !piUsername; $('piUser').textContent = piUsername ? T.piConnected+' '+String.fromCharCode(0x2068)+piUsername+String.fromCharCode(0x2069) : ''; $('piAuth').textContent = piUsername ? T.disconnect : T.piLogin; $('piAuth').disabled = piBusy; }
+  function renderPi() {
+    const webConnected = !!window.FOC_WEB_ACCOUNT?.isConnected?.();
+    const connected = webConnected || !!piUsername;
+    $('piUser').hidden = !piUsername;
+    $('piUser').textContent = piUsername ? T.piConnected+' '+String.fromCharCode(0x2068)+piUsername+String.fromCharCode(0x2069) : '';
+    $('piAuth').textContent = connected ? T.disconnect : T.piLogin;
+    $('piAuth').disabled = piBusy;
+  }
+  window.FOC_CLEAR_PI_DISPLAY = () => {
+    piUsername = '';
+    try { sessionStorage.removeItem('foc-pi-display'); } catch { }
+    renderPi();
+  };
+  window.addEventListener('foc-web-account-state', renderPi);
   function restorePiDisplay() {
     // Display-only, per-tab handoff from a successful server approval, never an auth credential.
     try {
@@ -13177,6 +13190,8 @@ window.FOP_HOME_TEXT = {
     finally{if(objectURL)URL.revokeObjectURL(objectURL);$('qrImage').value='';}
   };
   $('piAuth').onclick=()=>{
+    const websiteAccount = window.FOC_WEB_ACCOUNT;
+    if (websiteAccount?.isConnected?.()) { websiteAccount.disconnect(); return; }
     if(piUsername){piUsername='';try{sessionStorage.removeItem('foc-pi-display')}catch{}renderPi();piStatus('piExplain');return;}
     openScanner('', 'auth');
   };
