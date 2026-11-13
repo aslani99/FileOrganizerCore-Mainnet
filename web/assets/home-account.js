@@ -79,7 +79,11 @@
   }
 
   function renderAccount(profile, quota, session) {
-    const plan = String(quota?.plan || profile?.plan || '').toLowerCase();
+    const rawPlan = String(profile?.plan || '').toLowerCase();
+    const profileExpiry = profile?.plan_expires_at ? Date.parse(profile.plan_expires_at) : NaN;
+    const profilePlanExpired = ['pro', 'max'].includes(rawPlan)
+      && Number.isFinite(profileExpiry) && profileExpiry <= Date.now();
+    const plan = String(quota?.plan || (profilePlanExpired ? 'free' : rawPlan) || '').toLowerCase();
     if (!['free', 'pro', 'max'].includes(plan)) throw new Error('invalid_plan');
     const remaining = Number(quota?.remaining_bytes);
     let quotaText = t('quotaUnavailable');
@@ -208,26 +212,47 @@
       expectedRefreshToken = session.refreshToken;
       if (!isCurrent()) return;
       // Apply any expired-plan transition before reading the current plan and quota.
-      await authorizedFetch('/rest/v1/rpc/refresh_subscription', session, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
-      });
+      let subscriptionRefreshFailed = false;
+      try {
+        await authorizedFetch('/rest/v1/rpc/refresh_subscription', session, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
+        });
+      } catch (error) {
+        if (error?.message === 'session_expired') throw error;
+        subscriptionRefreshFailed = true;
+      }
       if (!isCurrent()) return;
       const userId = encodeURIComponent(ownerId);
-      const [profileResponse, quotaResponse] = await Promise.all([
+      const [profileResult, quotaResult] = await Promise.allSettled([
         authorizedFetch(`/rest/v1/profiles?select=plan,plan_expires_at,last_expired_plan&id=eq.${userId}`, session),
         authorizedFetch('/rest/v1/rpc/get_organization_quota_status', session, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}'
         })
       ]);
-      const [profiles, quota] = await Promise.all([profileResponse.json(), quotaResponse.json()]);
       if (!isCurrent()) return;
-      if (!Array.isArray(profiles) || profiles.length !== 1 || !quota || typeof quota !== 'object')
+      if (profileResult.status !== 'fulfilled') throw profileResult.reason;
+      const profiles = await profileResult.value.json();
+      let quota = null;
+      if (quotaResult.status === 'fulfilled') {
+        try {
+          const payload = await quotaResult.value.json();
+          quota = Array.isArray(payload) && payload.length === 1 ? payload[0] : payload;
+          if (!quota || typeof quota !== 'object' || Array.isArray(quota)) quota = null;
+          else {
+            const quotaPlan = String(quota.plan || '').toLowerCase();
+            const remainingBytes = Number(quota.remaining_bytes);
+            if (!['free', 'pro', 'max'].includes(quotaPlan) || !Number.isFinite(remainingBytes)
+                || remainingBytes < -1 || (remainingBytes === -1 && !['pro', 'max'].includes(quotaPlan))) quota = null;
+          }
+        } catch { quota = null; }
+      }
+      if (!Array.isArray(profiles) || profiles.length !== 1 || !profiles[0])
         throw new Error('account_sync_failed');
       // Never show a response belonging to an account that has since disconnected or changed.
       const latest = readSession();
       if (!sameOwner(latest, ownerId) || latest.refreshToken !== session.refreshToken) return;
       renderAccount(profiles[0], quota, session);
-      setStatus(t('synced'));
+      setStatus(!quota ? t('quotaUnavailable') : subscriptionRefreshFailed ? t('failed') : t('synced'), !quota || subscriptionRefreshFailed);
       notifyConnectionChanged();
     } catch (error) {
       if (!isCurrent()) return;

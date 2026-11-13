@@ -8,11 +8,11 @@
     (() => { const q = new URLSearchParams(location.hash.split('?')[1] || ''); const theme = q.get('theme');
       document.documentElement.dataset.theme = theme === 'dark' || theme === 'light' ? theme : matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'; })();
   </script>
-  <link rel="stylesheet" href="assets/pi-login.css?v=20261113-return-home">
+  <link rel="stylesheet" href="assets/pi-login.css?v=20261113-desktop-confirm">
   <script defer src="config.js?v=20261110-mainnet"></script>
-  <script defer src="assets/pi-auth-i18n.js?v=20261112-password8"></script>
+  <script defer src="assets/pi-auth-i18n.js?v=20261113-desktop-confirm"></script>
   <script defer src="https://sdk.minepi.com/pi-sdk.js"></script>
-  <script defer src="assets/pi-login.js?v=20261113-desktop-handoff"></script>
+  <script defer src="assets/pi-login.js?v=20261113-desktop-confirm"></script>
 <link rel="icon" href="assets/brand/favicon.ico?v=20261110">
 <link rel="apple-touch-icon" href="assets/brand/apple-touch-icon.png">
 <style>.foc-logo{width:36px;height:36px;object-fit:contain;flex:none;vertical-align:middle;border-radius:8px}.foc-brand{display:flex;align-items:center;gap:10px;direction:ltr}</style>

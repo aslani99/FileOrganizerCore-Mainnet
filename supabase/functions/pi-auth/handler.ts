@@ -66,14 +66,18 @@ export async function handlePiAuth(req: Request): Promise<Response> {
   }
   if(b.action==='browser_session'){
    const c=await challenge('browser',true);
-   if(c.purpose!=='login')fail('invalid_request');
-   // Browser access is deliberately withheld until the desktop app has confirmed and consumed
-   // the same challenge. Pi Browser approval by itself never creates a website session.
+   if(!['login','link'].includes(c.purpose))fail('invalid_request');
+   // Pi Browser approval alone never grants browser account access. Both login and
+   // link flows wait until desktop redeem atomically changes the challenge to consumed.
    if(c.state!=='consumed')return reply({state:'waiting_for_desktop',expires_at:c.expires_at});
    const found=await db.from('pi_account_identities').select('user_id').eq('app_namespace',ns).eq('pi_uid',c.pi_uid).maybeSingle();
    if(found.error)throw found.error;
-   // The desktop redeem may have consumed the challenge just before binding the identity.
-   if(!found.data?.user_id)return reply({state:'waiting_for_desktop',expires_at:c.expires_at});
+   let userId:string|null=null;
+   if(c.purpose==='login') userId=found.data?.user_id||null;
+   else if(c.owner_id && found.data?.user_id===c.owner_id) userId=c.owner_id;
+   // For linking, the new Pi identity must be bound to the exact desktop owner.
+   // A transient delay between challenge consumption and binding remains a wait state.
+   if(!userId)return reply({state:'waiting_for_desktop',expires_at:c.expires_at});
    const claimedAt=new Date().toISOString();
    const claim=await db.from('pi_login_challenges').update({browser_session_issued_at:claimedAt})
     .eq('id',c.id).eq('state','consumed').is('browser_session_issued_at',null)
@@ -81,7 +85,7 @@ export async function handlePiAuth(req: Request): Promise<Response> {
    if(claim.error)throw claim.error;
    if(!claim.data)fail('browser_session_already_issued');
    try {
-    return reply(await mintSession(found.data.user_id,c.pi_username));
+    return reply(await mintSession(userId,c.pi_username));
    } catch(error) {
     // A transient Auth-provider failure may be retried while this challenge is still alive.
     const reset=await db.from('pi_login_challenges').update({browser_session_issued_at:null})

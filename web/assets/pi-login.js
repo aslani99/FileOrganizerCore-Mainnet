@@ -99,7 +99,7 @@
     $('match').disabled = busy || awaitingDesktop || done || expired || !challenge;
     $('status').textContent = statusKey ? t(statusKey) : '';
     $('status').hidden = !statusKey;
-    $('status').dataset.tone = done ? 'success' : 'error';
+    $('status').dataset.tone = done ? 'success' : statusKey === 'waiting_for_desktop' ? 'pending' : 'error';
     $('account').hidden = !done || !username;
     $('accountLabel').textContent = t('account');
     $('accountName').textContent = username;
@@ -136,17 +136,6 @@
     return { data, elapsed: performance.now() - started };
   }
 
-  function finishLinkApproval(response) {
-    try { sessionStorage.removeItem(PENDING_SECRET_KEY); } catch { }
-    done = true;
-    awaitingDesktop = false;
-    expired = false;
-    username = response.username || '';
-    statusKey = 'browser_done';
-    clearInterval(timer);
-    render();
-  }
-
   function decodeExpiry(jwt) {
     try {
       const part = jwt.split('.')[1].replace(/-/g, '+').replace(/_/g, '/');
@@ -171,13 +160,11 @@
   }
 
   async function waitForDesktopRedeem() {
-    if (challenge?.purpose === 'link') {
-      finishLinkApproval({ username });
-      return;
-    }
+    // Pi Browser approval is only the identity check. The desktop app must still
+    // show its confirmation dialog and successfully redeem this exact challenge.
     awaitingDesktop = true;
     expired = false;
-    statusKey = 'browser_done';
+    statusKey = 'waiting_for_desktop';
     render();
     try {
       while (true) {
@@ -198,7 +185,7 @@
           done = true;
           awaitingDesktop = false;
           expired = false;
-          statusKey = '';
+          statusKey = 'browser_done';
           username = response.data.user.pi_username || username;
           clearInterval(timer);
           render();
@@ -221,12 +208,8 @@
     challenge = { ...(challenge || {}), ...response, state: response.state || 'approved' };
     username = response.username || username;
     syncClock(response, elapsed);
-    if (challenge.purpose === 'link') {
-      finishLinkApproval(response);
-      return;
-    }
     awaitingDesktop = true;
-    statusKey = 'browser_done';
+    statusKey = 'waiting_for_desktop';
     tick();
     if (!timer) timer = setInterval(tick, 1000);
     render();
@@ -287,7 +270,7 @@
           && savedSession?.user?.id && savedSession?.accessToken && savedSession?.refreshToken) {
         try { sessionStorage.removeItem(PENDING_SECRET_KEY); } catch { }
         username = savedSession.user.pi_username || challenge.username || '';
-        done = true; statusKey = ''; loading = false; render(); return;
+        done = true; statusKey = 'browser_done'; loading = false; render(); return;
       }
       if (['approved', 'consumed'].includes(challenge.state)) {
         await handleApproved(challenge, inspected.elapsed);
