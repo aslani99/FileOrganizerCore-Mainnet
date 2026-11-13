@@ -78,12 +78,26 @@ export async function handlePiAuth(req: Request): Promise<Response> {
    // For linking, the new Pi identity must be bound to the exact desktop owner.
    // A transient delay between challenge consumption and binding remains a wait state.
    if(!userId)return reply({state:'waiting_for_desktop',expires_at:c.expires_at});
+   // The browser secret is a short-lived capability. Permit a small number of
+   // retries after the first claim so a lost HTTP response does not strand the
+   // user after the desktop has already confirmed this challenge.
+   await rate('browser-session:'+await hash(ns+':'+b.browser_secret),5,300);
+   if(c.browser_session_issued_at) return reply(await mintSession(userId,c.pi_username));
    const claimedAt=new Date().toISOString();
    const claim=await db.from('pi_login_challenges').update({browser_session_issued_at:claimedAt})
     .eq('id',c.id).eq('state','consumed').is('browser_session_issued_at',null)
     .gt('expires_at',new Date().toISOString()).select('id').maybeSingle();
    if(claim.error)throw claim.error;
-   if(!claim.data)fail('browser_session_already_issued');
+   if(!claim.data) {
+    // A concurrent request may have won the claim. Re-read before deciding;
+    // the same browser capability may recover the session, but never before
+    // the desktop has consumed the challenge and the Pi identity is bound.
+    const latest=await db.from('pi_login_challenges').select('browser_session_issued_at')
+     .eq('id',c.id).eq('state','consumed').gt('expires_at',new Date().toISOString()).maybeSingle();
+    if(latest.error)throw latest.error;
+    if(!latest.data?.browser_session_issued_at)fail('expired');
+    return reply(await mintSession(userId,c.pi_username));
+   }
    try {
     return reply(await mintSession(userId,c.pi_username));
    } catch(error) {
